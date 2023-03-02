@@ -1,4 +1,3 @@
-#include <ctype.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,15 +8,22 @@
 #define ALUP "abcdefghijklmnopqrstuvwxyz"
 #define ALDN "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 #define NUM "0123456789"
+#define SPACE " \t\r"
 
 typedef struct Token {
     ConstSpan span;
     enum { NONE, ID, NUMBER, STRING, BOOLEAN, CHAR } type;
 } Token;
 
+static char to_upper(char c) {
+    if (c >= 'a' && c <= 'z')
+        c -= 32;
+    return c;
+}
+
 static int skip_whitespace(ConstSpan *span) {
     int length = 0;
-    while (span->start < span->end && span->start[0] != '\n' && isspace(span->start[0])) {
+    while (span->start < span->end && strchr(SPACE, span->start[0])) {
         span->start++;
         length++;
     }
@@ -48,37 +54,60 @@ static int scan(ConstSpan *span, const char *accept, const char *reject) {
 }
 
 static bool span_starts_with_string(ConstSpan span, const char *string, bool case_insensitive) {
-    for (; span.start < span.end && string[0]; span.start++, string++) {
+    while(span.start < span.end && string[0]) {
         char a = span.start[0];
         char b = *string;
         if (case_insensitive) {
-            a = toupper(a);
-            b = toupper(b);
+            a = to_upper(a);
+            b = to_upper(b);
         }
         if (a != b)
             return false;
+        span.start++;
+        string++;
     }
     return string[0] == 0;
 }
 
+static bool span_equals_string(ConstSpan span, const char *string, bool case_insensitive) {
+    while (span.start < span.end && string[0]) {
+        char a = span.start[0];
+        char b = *string;
+        if (case_insensitive) {
+            a = to_upper(a);
+            b = to_upper(b);
+        }
+        if (a != b)
+            return false;
+        span.start++;
+        string++;
+    }
+    return span.start == span.end && string[0] == 0;
+}
+
 static int scan_id(ConstSpan *span, Token *token) {
+    if (span->start >= span->end)
+        goto fail;
     if (strchr(ALUP ALDN, span->start[0])) {
         *token = (Token){ .span = {.start = span->start}, .type = ID };
         token->span.end = token->span.start + scan(span, ALUP ALDN NUM, 0);
         return 1;
     }
+fail:
     return 0;
 }
 
 static int scan_number(ConstSpan *span, Token *token) {
     ConstSpan restart = *span;
+    if (span->start >= span->end)
+        goto fail;
     if (strchr("+-." NUM, span->start[0])) {
         *token = (Token){ .span = {.start = span->start}, .type = NUMBER };
         if(strchr("+-", span->start[0]))
             span->start++;
         if(scan(span, NUM, 0) == 0 && (span->start >= span->end || span->start[0] != '.'))
             goto fail;
-        if (span->start[0] == '.') {
+        if (span->start < span->end && span->start[0] == '.') {
             span->start++;
             if (scan(span, NUM, 0) == 0)
                 goto fail;
@@ -93,6 +122,8 @@ fail:
 
 static int scan_string(ConstSpan *span, Token *token) {
     ConstSpan restart = *span;
+    if (span->start >= span->end)
+        goto fail;
     if (span->start[0] == '"') {
         span->start++;
         *token = (Token){ .span = {.start = span->start}, .type = STRING };
@@ -109,7 +140,7 @@ fail:
 
 static int scan_boolean(ConstSpan *span, Token *token) {
     ConstSpan restart = *span;
-    if (scan_id(span, token) && (span_starts_with_string(token->span, "true", true) || span_starts_with_string(token->span, "false", true))) {
+    if (scan_id(span, token) && (span_equals_string(token->span, "true", true) || span_equals_string(token->span, "false", true))) {
         token->type = BOOLEAN;
         return 1;
     }
@@ -126,12 +157,12 @@ static int scan_char(ConstSpan *span, Token *token) {
     return 0;
 }
 
-static int next_token_restart(ConstSpan *span, Token *token, int restart_type) {
+static int next_token_resume(ConstSpan *span, Token *token, int resume_type) {
     skip_whitespace(span);
     skip_comment(span);
     if (span->start >= span->end)
         return 0;
-    switch (restart_type) {
+    switch (resume_type) {
     case NONE: if (scan_id(span, token)) return 1;
     case ID: if (scan_number(span, token)) return 1;
     case NUMBER: if (scan_string(span, token)) return 1;
@@ -142,7 +173,7 @@ static int next_token_restart(ConstSpan *span, Token *token, int restart_type) {
 }
 
 static int next_token(ConstSpan *span, Token *token) {
-    return next_token_restart(span, token, NONE);
+    return next_token_resume(span, token, NONE);
 }
 
 static size_t scan_tokens(ConstSpan *span, Token *tokens, size_t num_tokens) {
@@ -165,20 +196,22 @@ static IniValue get_token_value(Token *token) {
 
 static int parse_property(ConstSpan *span, ConstSpan section, void *user_data, IniPropertyCallback callback) {
     ConstSpan restart = *span;
-    Token tokens[3] = { 0 };
-    if (scan_tokens(span, tokens, 3) != 3 ||
-        tokens[0].type != ID || tokens[1].type != CHAR || tokens[1].span.start[0] != '=')
+    Token tokens[4] = { 0 };
+    if (scan_tokens(span, tokens, 4) != 4 ||
+        tokens[0].type != ID ||
+        tokens[1].type != CHAR || tokens[1].span.start[0] != '=' ||
+        tokens[3].type != CHAR || tokens[3].span.start[0] != '\n')
         goto fail;
     do {
         if (tokens[2].type == NUMBER || tokens[2].type == STRING || tokens[2].type == BOOLEAN)
             break;
         span->start = tokens[2].span.start;
-    } while (next_token_restart(span, &tokens[2], tokens[2].type));
+    } while (next_token_resume(span, &tokens[2], tokens[2].type));
     if (section.start == 0 || section.start >= section.end) {
         fprintf(stderr, "Error: property found before any sections\n");
         goto fail;
     }
-    callback(user_data, section, tokens[1].span, get_token_value(&tokens[2]));
+    callback(user_data, section, tokens[0].span, get_token_value(&tokens[2]));
     return 1;
 fail:   
     *span = restart;
@@ -187,12 +220,13 @@ fail:
 
 static int parse_section(ConstSpan *span, ConstSpan *current_section) {
     ConstSpan restart = *span;
-    Token tokens[3] = { 0 };
-    if (scan_tokens(span, tokens, 3) != 3)
+    Token tokens[4] = { 0 };
+    if (scan_tokens(span, tokens, 4) != 4)
         goto fail;
     if (tokens[0].type != CHAR || tokens[0].span.start[0] != '[' ||
         tokens[1].type != ID ||
-        tokens[2].type != CHAR || tokens[2].span.start[0] != ']')
+        tokens[2].type != CHAR || tokens[2].span.start[0] != ']' ||
+        tokens[3].type != CHAR || tokens[3].span.start[0] != '\n')
         goto fail;
     *current_section = tokens[1].span;
     return 1;
@@ -229,6 +263,7 @@ int parse_ini(ConstSpan *span, void *user_data, IniPropertyCallback property_cal
             s < span->end && (s == span->start || s[-1] != '\n');
             s++)
             putchar(*s);
+        printf("\n");
         return 0;
     }
     return 1;

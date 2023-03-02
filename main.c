@@ -1,7 +1,7 @@
-#include <assert.h	>
+﻿#include <assert.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
+#include <stdlib.h>
 #include "ini.h"
 
 void property(void *user_data, ConstSpan section, ConstSpan key, IniValue value) {
@@ -30,7 +30,7 @@ void property(void *user_data, ConstSpan section, ConstSpan key, IniValue value)
 
 
 int main() {
-    const char *ini =
+    const char ini_test[] =
         "[foo]\n"
         "bar = 10 # This line has spaces and a comment\n"
         "\n" // An empty line
@@ -40,10 +40,17 @@ int main() {
         "bar=TrUe\n"
         "bar=TRUE\n"
         "bar=false\n"
-        "bar=FaLsE\n"
         "baz=10\n"
         "baz=.3\n"
         "qux=-.75\n"
-        "baz=+100.0\n";
-    printf("%d\n", parse_ini(&(ConstSpan) { ini, ini + strlen(ini) }, 0, property));
+        "baz=+100.0\n"
+        "bar=FaLsE\n"
+        "bar=10.";
+    size_t ini_length = sizeof(ini_test) - 1; // Do not include nul
+    char *ini = malloc(ini_length);
+    assert(ini);
+    memcpy(ini, ini_test, ini_length);
+    if (!parse_ini(&(ConstSpan) { ini, ini + ini_length }, 0, property)) {
+        printf("Parse failed\n");
+    }
 }
