@@ -48,9 +48,7 @@ static int scan(ConstSpan *span, const char *accept, const char *reject) {
 }
 
 static bool span_starts_with_string(ConstSpan span, const char *string, bool case_insensitive) {
-    for (;
-        span.start < span.end && string[0];
-        span.start++, string++) {
+    for (; span.start < span.end && string[0]; span.start++, string++) {
         char a = span.start[0];
         char b = *string;
         if (case_insensitive) {
@@ -66,8 +64,7 @@ static bool span_starts_with_string(ConstSpan span, const char *string, bool cas
 static int scan_id(ConstSpan *span, Token *token) {
     if (strchr(ALUP ALDN, span->start[0])) {
         *token = (Token){ .span = {.start = span->start}, .type = ID };
-        scan(span, ALUP ALDN NUM, 0);
-        token->span.end = span->start;
+        token->span.end = token->span.start + scan(span, ALUP ALDN NUM, 0);
         return 1;
     }
     return 0;
@@ -75,21 +72,17 @@ static int scan_id(ConstSpan *span, Token *token) {
 
 static int scan_number(ConstSpan *span, Token *token) {
     ConstSpan restart = *span;
-    if (strchr("+-" NUM, span->start[0])) {
+    if (strchr("+-." NUM, span->start[0])) {
         *token = (Token){ .span = {.start = span->start}, .type = NUMBER };
         if(strchr("+-", span->start[0]))
             span->start++;
-        int left_digits = scan(span, NUM, 0);
-        if (span->start >= span->end || span->start[0] != '.') {
-            if (left_digits == 0)
-                goto fail;
-            goto done;
-        }
-        span->start++;
-        int right_digits = scan(span, NUM, 0);
-        if (right_digits == 0)
+        if(scan(span, NUM, 0) == 0 && (span->start >= span->end || span->start[0] != '.'))
             goto fail;
-    done:
+        if (span->start[0] == '.') {
+            span->start++;
+            if (scan(span, NUM, 0) == 0)
+                goto fail;
+        }
         token->span.end = span->start;
         return 1;
     }

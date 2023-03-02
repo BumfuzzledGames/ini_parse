@@ -42,7 +42,8 @@ int main() {
         "bar=false\n"
         "bar=FaLsE\n"
         "baz=10\n"
-        "baz=-10.3\n"
+        "baz=.3\n"
+        "qux=-.75\n"
         "baz=+100.0\n";
     printf("%d\n", parse_ini(&(ConstSpan) { ini, ini + strlen(ini) }, 0, property));
 }
